@@ -1,7 +1,7 @@
 NEStein
 =======
 
-This is a NES emulator written entirely in vb.net. The emulator uses DirectX to Render Video, Sound Emulation and Input. It's still early stages of development, but already runs many games.
+This is a NES emulator written entirely in vb.net. The emulator uses Direct3D to Render Video, DirectSound to emulate NES APU, and DirectIpunt to read Input from controllers/keyboard. It's still in early stages of development, but already runs many games.
 
 HOW TO COMPILE
 ==============
