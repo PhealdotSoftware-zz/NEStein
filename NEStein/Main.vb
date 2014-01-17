@@ -106,7 +106,7 @@ Module Main
         ' Reset NES
         '---------------------------------------
         Mapper_Reset()
-        Reset_CPU()
+        CPU_Reset()
         For i As Integer = 0 To 7 'Erase Input
             Controller_1(i) = &H40
             Controller_2(i) = &H40
@@ -127,13 +127,54 @@ Module Main
             Do While NES_Pause
                 Application.DoEvents()
             Loop
-            If LimitFPS Then Lock_Framerate(60)
-            Execute_CPU()
-            FrmMain.Text = Get_FPS()
+            
+
+            CPU_Execute()
+
+            '----
+
+            'will be moved later
+
+            Mapper_HBlank(CurrentLine, PPU_Control2)
+            Render_ScanLine(CurrentLine)
+
+            If CurrentLine > 239 Then
+                PPU_Status = &H80
+                If CurrentLine = 240 And CBool(PPU_Control1 And &H80) Then
+                    CPU_NMI()
+                End If
+            End If
+
+            If CurrentLine = 262 Then
+                If APU.Enabled Then Sound_Process_Through_Mixer(Executed_Cycles) 'Sound
+
+                If Render Then Draw_Screen()
+
+                If LimitFPS Then Lock_Framerate(60)
+                FrmMain.Text = Get_FPS()
+
+
+                Frames += 1
+                Render = (Frames Mod FrameSkip = 0)
+
+                ReadInput() 'Controller
+
+                CurrentLine = 0 'Next Frame
+                PPU_Status = 0
+            Else
+                CurrentLine += 1
+            End If
+
+            '----
+
             Application.DoEvents()
+
+
         Loop
     End Sub
     Public Sub ReadInput()
+        'This mess will be rewrited soon
+
         If JoystickPlugged() = 0 Then
             'Keyboard only
             For i As Integer = 0 To 7

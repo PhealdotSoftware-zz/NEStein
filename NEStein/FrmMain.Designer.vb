@@ -25,12 +25,19 @@ Partial Class FrmMain
         Me.NesScreen = New System.Windows.Forms.PictureBox()
         Me.EmuMenu = New System.Windows.Forms.MenuStrip()
         Me.ArquivoToolStripMenuItem = New System.Windows.Forms.ToolStripMenuItem()
+        Me.MnuResume = New System.Windows.Forms.ToolStripMenuItem()
+        Me.MnuSep_1_1 = New System.Windows.Forms.ToolStripSeparator()
         Me.MnuOpen = New System.Windows.Forms.ToolStripMenuItem()
         Me.MnuClose = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuSep_1_1 = New System.Windows.Forms.ToolStripSeparator()
+        Me.MnuSep_1_2 = New System.Windows.Forms.ToolStripSeparator()
         Me.MnuSave = New System.Windows.Forms.ToolStripMenuItem()
         Me.MnuLoad = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuSep_1_2 = New System.Windows.Forms.ToolStripSeparator()
+        Me.MnuSep_1_3 = New System.Windows.Forms.ToolStripSeparator()
+        Me.MnuRecordMovie = New System.Windows.Forms.ToolStripMenuItem()
+        Me.MnuRecordSnd = New System.Windows.Forms.ToolStripMenuItem()
+        Me.MnuSep_1_4 = New System.Windows.Forms.ToolStripSeparator()
+        Me.MnuSS = New System.Windows.Forms.ToolStripMenuItem()
+        Me.MnuSep_1_5 = New System.Windows.Forms.ToolStripSeparator()
         Me.MnuExit = New System.Windows.Forms.ToolStripMenuItem()
         Me.FerramentasToolStripMenuItem = New System.Windows.Forms.ToolStripMenuItem()
         Me.PauseToolStripMenuItem = New System.Windows.Forms.ToolStripMenuItem()
@@ -99,13 +106,6 @@ Partial Class FrmMain
         Me.AjudaToolStripMenuItem = New System.Windows.Forms.ToolStripMenuItem()
         Me.SobreToolStripMenuItem = New System.Windows.Forms.ToolStripMenuItem()
         Me.AbreRom = New System.Windows.Forms.OpenFileDialog()
-        Me.MnuResume = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuSep_1_3 = New System.Windows.Forms.ToolStripSeparator()
-        Me.MnuRecordMovie = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuRecordSnd = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuSS = New System.Windows.Forms.ToolStripMenuItem()
-        Me.MnuSep_1_4 = New System.Windows.Forms.ToolStripSeparator()
-        Me.MnuSep_1_5 = New System.Windows.Forms.ToolStripSeparator()
         CType(Me.NesScreen, System.ComponentModel.ISupportInitialize).BeginInit()
         Me.EmuMenu.SuspendLayout()
         Me.SuspendLayout()
@@ -137,6 +137,17 @@ Partial Class FrmMain
         Me.ArquivoToolStripMenuItem.Size = New System.Drawing.Size(37, 20)
         Me.ArquivoToolStripMenuItem.Text = "&File"
         '
+        'MnuResume
+        '
+        Me.MnuResume.Name = "MnuResume"
+        Me.MnuResume.Size = New System.Drawing.Size(161, 22)
+        Me.MnuResume.Text = "&Resume"
+        '
+        'MnuSep_1_1
+        '
+        Me.MnuSep_1_1.Name = "MnuSep_1_1"
+        Me.MnuSep_1_1.Size = New System.Drawing.Size(158, 6)
+        '
         'MnuOpen
         '
         Me.MnuOpen.Name = "MnuOpen"
@@ -149,10 +160,10 @@ Partial Class FrmMain
         Me.MnuClose.Size = New System.Drawing.Size(161, 22)
         Me.MnuClose.Text = "&Close ROM"
         '
-        'MnuSep_1_1
+        'MnuSep_1_2
         '
-        Me.MnuSep_1_1.Name = "MnuSep_1_1"
-        Me.MnuSep_1_1.Size = New System.Drawing.Size(158, 6)
+        Me.MnuSep_1_2.Name = "MnuSep_1_2"
+        Me.MnuSep_1_2.Size = New System.Drawing.Size(158, 6)
         '
         'MnuSave
         '
@@ -166,10 +177,38 @@ Partial Class FrmMain
         Me.MnuLoad.Size = New System.Drawing.Size(161, 22)
         Me.MnuLoad.Text = "Quick &Load (F7)"
         '
-        'MnuSep_1_2
+        'MnuSep_1_3
         '
-        Me.MnuSep_1_2.Name = "MnuSep_1_2"
-        Me.MnuSep_1_2.Size = New System.Drawing.Size(158, 6)
+        Me.MnuSep_1_3.Name = "MnuSep_1_3"
+        Me.MnuSep_1_3.Size = New System.Drawing.Size(158, 6)
+        '
+        'MnuRecordMovie
+        '
+        Me.MnuRecordMovie.Name = "MnuRecordMovie"
+        Me.MnuRecordMovie.Size = New System.Drawing.Size(161, 22)
+        Me.MnuRecordMovie.Text = "Record &Movie..."
+        '
+        'MnuRecordSnd
+        '
+        Me.MnuRecordSnd.Name = "MnuRecordSnd"
+        Me.MnuRecordSnd.Size = New System.Drawing.Size(161, 22)
+        Me.MnuRecordSnd.Text = "Record &Wave..."
+        '
+        'MnuSep_1_4
+        '
+        Me.MnuSep_1_4.Name = "MnuSep_1_4"
+        Me.MnuSep_1_4.Size = New System.Drawing.Size(158, 6)
+        '
+        'MnuSS
+        '
+        Me.MnuSS.Name = "MnuSS"
+        Me.MnuSS.Size = New System.Drawing.Size(161, 22)
+        Me.MnuSS.Text = "Screenshot (F12)"
+        '
+        'MnuSep_1_5
+        '
+        Me.MnuSep_1_5.Name = "MnuSep_1_5"
+        Me.MnuSep_1_5.Size = New System.Drawing.Size(158, 6)
         '
         'MnuExit
         '
@@ -620,45 +659,6 @@ Partial Class FrmMain
         '
         Me.AbreRom.Filter = "Nes ROMs (*.nes)|*.nes"
         Me.AbreRom.Title = "Abrir ROM"
-        '
-        'MnuResume
-        '
-        Me.MnuResume.Name = "MnuResume"
-        Me.MnuResume.Size = New System.Drawing.Size(161, 22)
-        Me.MnuResume.Text = "&Resume"
-        '
-        'MnuSep_1_3
-        '
-        Me.MnuSep_1_3.Name = "MnuSep_1_3"
-        Me.MnuSep_1_3.Size = New System.Drawing.Size(158, 6)
-        '
-        'MnuRecordMovie
-        '
-        Me.MnuRecordMovie.Name = "MnuRecordMovie"
-        Me.MnuRecordMovie.Size = New System.Drawing.Size(161, 22)
-        Me.MnuRecordMovie.Text = "Record &Movie..."
-        '
-        'MnuRecordSnd
-        '
-        Me.MnuRecordSnd.Name = "MnuRecordSnd"
-        Me.MnuRecordSnd.Size = New System.Drawing.Size(161, 22)
-        Me.MnuRecordSnd.Text = "Record &Wave..."
-        '
-        'MnuSS
-        '
-        Me.MnuSS.Name = "MnuSS"
-        Me.MnuSS.Size = New System.Drawing.Size(161, 22)
-        Me.MnuSS.Text = "Screenshot (F12)"
-        '
-        'MnuSep_1_4
-        '
-        Me.MnuSep_1_4.Name = "MnuSep_1_4"
-        Me.MnuSep_1_4.Size = New System.Drawing.Size(158, 6)
-        '
-        'MnuSep_1_5
-        '
-        Me.MnuSep_1_5.Name = "MnuSep_1_5"
-        Me.MnuSep_1_5.Size = New System.Drawing.Size(158, 6)
         '
         'FrmMain
         '

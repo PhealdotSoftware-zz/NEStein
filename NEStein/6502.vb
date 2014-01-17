@@ -164,21 +164,19 @@ Module _6502
     ' Registers
     '---------------------------------------
     Private Structure CPU_Registers
-        Dim A As Byte 'Accumulator
-        Dim P As Byte
-        Dim X As Byte 'X Index
-        Dim Y As Byte 'Y Index
-        Dim S As Byte
+        Dim PC As Integer 'Program Counter (16 bits)
+        Dim AC As Byte 'Accumulator
+        Dim X As Byte 'X Register
+        Dim Y As Byte 'Y Register
+        Dim SR As Byte 'Status Register
+        Dim SP As Byte 'Stack Pointer
     End Structure
     Private Regs As CPU_Registers
 
-    Public PC As Integer 'Program Counter
-    Private SavePC As Integer 'Program Counter Temp
-    Public Opcode As Integer
+    Private Effective_Address As Integer
     Private Tick_Count As Integer
-
-    'Misc
-    Private ExecutedCycles As Long
+    Private Opcode As Byte
+    Public Executed_Cycles As Long
     Public CurrentLine As Integer
     Public Frames As Long
 
@@ -186,21 +184,52 @@ Module _6502
     Public Const NES_PAL_CPU_SPEED_MHZ As Single = 1773447 'MHz (System 26.601171Mhz / 15)
 
     Const Cycles_Per_Scanline As Single = NES_NTSC_CPU_SPEED_MHZ / 60 / 262
-
-    Public Sub Reset_CPU()
-        Regs.A = 0
+    Const Base_Stack = &H100
+    Public Sub CPU_Reset()
+        Regs.AC = 0
         Regs.X = 0
         Regs.Y = 0
-        Regs.S = &HFF
-        Regs.P = &H20
-        PC = ReadMemory16(Reset_Vector)
+        Regs.SP = &HFF
+        Regs.SR = &H20
+        Regs.PC = ReadMemory16(Reset_Vector)
     End Sub
-    Public Sub Execute_CPU()
-        Dim Old_Frames As Long = Frames
-
-        While Frames = Old_Frames
+    Public Sub CPU_Execute()
+        While Tick_Count <= Cycles_Per_Scanline
             Opcode = Fetch()
             Tick_Count += Ticks(Opcode)
+
+            Select Case AddrMode(Opcode)
+                Case ADDR_ABSO : Effective_Address = Fetch16()
+                Case ADDR_ABSX
+                    Dim Data As Integer = Fetch16()
+                    Effective_Address = Data + Regs.X
+                    If (Data And &HFF00) <> (Effective_Address And &HFF00) Then Tick_Count += 1 'Page Crossed
+                Case ADDR_ABSY
+                    Dim Data As Integer = Fetch16()
+                    Effective_Address = Data + Regs.Y
+                    If (Data And &HFF00) <> (Effective_Address And &HFF00) Then Tick_Count += 1 'Page Crossed
+                Case ADDR_IMP
+                Case ADDR_IMM
+                    Effective_Address = Regs.PC
+                    Regs.PC += 1
+                Case ADDR_IND
+                    Dim Temp As Integer = Fetch16()
+                    Dim Data As Integer = (Temp And &HFF00) Or ((Temp + 1) And &HFF) 'Zero Page Wrap
+                    Effective_Address = ReadMemory(Temp) + (ReadMemory(Data) * &H100)
+                Case ADDR_INDX : Effective_Address = ReadMemory16_ZP(Fetch() + Regs.X)
+                Case ADDR_INDY
+                    Dim Temp As Integer = Fetch()
+                    Dim Data As Integer = (Temp And &HFF00) Or ((Temp + 1) And &HFF) 'Zero Page Wrap
+                    Data = ReadMemory(Temp) + (ReadMemory(Data) * &H100)
+                    Effective_Address = Data + Regs.Y
+                    If (Data And &HFF00) <> (Effective_Address And &HFF00) Then Tick_Count += 1 'Page Crossed
+                Case ADDR_REL
+                    Effective_Address = Fetch()
+                    If Effective_Address >= &H80 Then Effective_Address -= &H100
+                Case ADDR_ZP : Effective_Address = Fetch()
+                Case ADDR_ZPX : Effective_Address = (Fetch() + Regs.X) And &HFF
+                Case ADDR_ZPY : Effective_Address = (Fetch() + Regs.Y) And &HFF
+            End Select
 
             Select Case Instruction(Opcode)
                 Case INS_ADC : Add_With_Carry()
@@ -262,7 +291,7 @@ Module _6502
                 Case INS_LAX : Load_Accumulator() : Load_X()
                 Case INS_SAX
                     Store_Accumulator() : Store_X()
-                    WriteMemory(SavePC, Regs.A And Regs.X)
+                    WriteMemory(Effective_Address, Regs.AC And Regs.X)
                 Case INS_DCP : Decrement() : Compare()
                 Case INS_ISB : Increment() : Subtract_With_Carry()
                 Case INS_SLO : Arithmetic_Shift_Left() : Or_With_Accumulator()
@@ -270,220 +299,130 @@ Module _6502
                 Case INS_SRE : Logical_Shift_Right() : Exclusive_Or()
                 Case INS_RRA : Rotate_Right() : Add_With_Carry()
             End Select
-
-            If Tick_Count > Cycles_Per_Scanline Then
-                ExecutedCycles += Tick_Count 'OBS ESTOURO
-                Mapper_HBlank(CurrentLine, PPU_Control2)
-                Render_ScanLine(CurrentLine)
-
-                If CurrentLine > 239 Then
-                    PPU_Status = &H80
-                    If CurrentLine = 240 And CBool(PPU_Control1 And &H80) Then
-                        CPU_NMI()
-                    End If
-                End If
-
-                If CurrentLine = 262 Then
-                    If APU.Enabled Then Sound_Process_Through_Mixer(ExecutedCycles) 'Sound
-
-                    If Render Then Draw_Screen()
-
-                    Frames += 1
-                    Render = (Frames Mod FrameSkip = 0)
-
-                    ReadInput() 'Controller
-
-                    CurrentLine = 0 'Next Frame
-                    PPU_Status = 0
-                Else
-                    CurrentLine += 1
-                End If
-
-                Tick_Count -= Cycles_Per_Scanline
-            End If
         End While
-    End Sub
-    Public Sub AdrMode(ByVal Opcode As Integer)
-        Select Case AddrMode(Opcode)
-            Case ADDR_ABSO : SavePC = Fetch16()
-            Case ADDR_ABSX
-                Dim DT As Integer = Fetch16()
-                SavePC = DT + Regs.X
-                If (DT And &HFF00) <> (SavePC And &HFF00) Then Tick_Count += 1 'Page Crossed
-            Case ADDR_ABSY
-                Dim DT As Integer = Fetch16()
-                SavePC = DT + Regs.Y
-                If (DT And &HFF00) <> (SavePC And &HFF00) Then Tick_Count += 1 'Page Crossed
-            Case ADDR_IMP
-            Case ADDR_IMM
-                SavePC = PC
-                PC += 1
-            Case ADDR_IND
-                Dim Temp As Integer = Fetch16()
-                Dim DT As Integer = (Temp And &HFF00) Or ((Temp + 1) And &HFF) 'Zero Page Wrap
-                SavePC = ReadMemory(Temp) + (ReadMemory(DT) * &H100)
-            Case ADDR_INDX : SavePC = ReadMemory16_ZP(Fetch() + Regs.X)
-            Case ADDR_INDY
-                Dim Temp As Integer = Fetch()
-                Dim DT As Integer = (Temp And &HFF00) Or ((Temp + 1) And &HFF) 'Zero Page Wrap
-                DT = ReadMemory(Temp) + (ReadMemory(DT) * &H100)
-                SavePC = DT + Regs.Y
-                If (DT And &HFF00) <> (SavePC And &HFF00) Then Tick_Count += 1 'Page Crossed
-            Case ADDR_REL
-                SavePC = Fetch()
-                If SavePC >= &H80 Then SavePC -= &H100
-            Case ADDR_ZP : SavePC = Fetch()
-            Case ADDR_ZPX : SavePC = (Fetch() + Regs.X) And &HFF
-            Case ADDR_ZPY : SavePC = (Fetch() + Regs.Y) And &HFF
-        End Select
+
+        Executed_Cycles += Tick_Count
+        Tick_Count -= Cycles_Per_Scanline
     End Sub
     Private Sub Add_With_Carry() 'ADC
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        Dim Temp As Integer = Regs.A + Data + (Regs.P And C_Flag)
-        TST_Flag(Temp > &HFF, C_Flag)
-        TST_Flag(((Not (Regs.A Xor Data)) And (Regs.A Xor Temp) And &H80), V_Flag)
-        Regs.A = Temp And &HFF
-        Set_ZN_Flag(Regs.A)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Dim Temp As Integer = Regs.AC + Data + (Regs.SR And C_Flag)
+        Test_Flag(Temp > &HFF, C_Flag)
+        Test_Flag(((Not (Regs.AC Xor Data)) And (Regs.AC Xor Temp) And &H80), V_Flag)
+        Regs.AC = Temp And &HFF
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub And_With_Accumulator() 'AND
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        Regs.A = Regs.A And Data
-        Set_ZN_Flag(Regs.A)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Regs.AC = Regs.AC And Data
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Arithmetic_Shift_Left() 'ASL
         If AddrMode(Opcode) = ADDR_ACC Then
-            TST_Flag(Regs.A And &H80, C_Flag)
-            Regs.A <<= 1
-            Set_ZN_Flag(Regs.A)
+            Test_Flag(Regs.AC And &H80, C_Flag)
+            Regs.AC <<= 1
+            Set_ZN_Flag(Regs.AC)
         Else
-            AdrMode(Opcode)
-            Dim Data As Byte = ReadMemory(SavePC)
-            TST_Flag(Data And &H80, C_Flag)
+            Dim Data As Byte = ReadMemory(Effective_Address)
+            Test_Flag(Data And &H80, C_Flag)
             Data <<= 1
-            WriteMemory(SavePC, Data)
+            WriteMemory(Effective_Address, Data)
             Set_ZN_Flag(Data)
         End If
     End Sub
     Private Sub Branch_On_Carry_Clear() 'BCC
-        If (Regs.P And C_Flag) = 0 Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If (Regs.SR And C_Flag) = 0 Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Branch_On_Carry_Set() 'BCS
-        If Regs.P And C_Flag Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If Regs.SR And C_Flag Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Branch_On_Equal() 'BEQ
-        If Regs.P And Z_Flag Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If Regs.SR And Z_Flag Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Bit_Test() 'BIT
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        TST_Flag((Data And Regs.A) = 0, Z_Flag)
-        TST_Flag(Data And N_Flag, N_Flag)
-        TST_Flag(Data And V_Flag, V_Flag)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Test_Flag((Data And Regs.AC) = 0, Z_Flag)
+        Test_Flag(Data And &H80, N_Flag)
+        Test_Flag(Data And &H40, V_Flag)
     End Sub
     Private Sub Branch_On_Minus() 'BMI
-        If Regs.P And N_Flag Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If Regs.SR And N_Flag Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Branch_On_Not_Equal() 'BNE
-        If (Regs.P And Z_Flag) = 0 Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If (Regs.SR And Z_Flag) = 0 Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Branch_On_Plus() 'BPL
-        If (Regs.P And N_Flag) = 0 Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If (Regs.SR And N_Flag) = 0 Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Break() 'BRK
-        PC += 1
-        Push(PC >> 8)
-        Push(PC And &HFF)
+        Regs.PC += 1
+        Push(Regs.PC >> 8)
+        Push(Regs.PC And &HFF)
         Set_Flag(B_Flag)
-        Push(Regs.P)
+        Push(Regs.SR)
         Set_Flag(I_Flag)
-        PC = ReadMemory16(IRQ_Vector)
+        Regs.PC = ReadMemory16(IRQ_Vector)
     End Sub
     Private Sub Branch_On_Overflow_Clear() 'BVC
-        If (Regs.P And V_Flag) = 0 Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If (Regs.SR And V_Flag) = 0 Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Branch_On_Overflow_Set() 'BVS
-        If Regs.P And V_Flag Then
-            AdrMode(Opcode)
-            If (PC And &HFF00) <> (PC + SavePC And &HFF00) Then
+        If Regs.SR And V_Flag Then
+            If (Regs.PC And &HFF00) <> (Regs.PC + Effective_Address And &HFF00) Then
                 Tick_Count += 2
             Else
                 Tick_Count += 1
             End If
-            PC += SavePC
-        Else
-            PC += 1
+            Regs.PC += Effective_Address
         End If
     End Sub
     Private Sub Clear_Carry() 'CLC
@@ -499,194 +438,171 @@ Module _6502
         Clear_Flag(V_Flag)
     End Sub
     Private Sub Compare() 'CMP
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        Dim Temp As Integer = Regs.A - Data
-        TST_Flag((Temp And &H8000) = 0, C_Flag)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Dim Temp As Integer = Regs.AC - Data
+        Test_Flag((Temp And &H8000) = 0, C_Flag)
         Set_ZN_Flag(Temp And &HFF)
     End Sub
     Private Sub Compare_With_X() 'CPX
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
+        Dim Data As Integer = ReadMemory(Effective_Address)
         Dim Temp As Integer = Regs.X - Data
-        TST_Flag((Temp And &H8000) = 0, C_Flag)
+        Test_Flag((Temp And &H8000) = 0, C_Flag)
         Set_ZN_Flag(Temp And &HFF)
     End Sub
     Private Sub Compare_With_Y() 'CPY
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
+        Dim Data As Integer = ReadMemory(Effective_Address)
         Dim Temp As Integer = Regs.Y - Data
-        TST_Flag((Temp And &H8000) = 0, C_Flag)
+        Test_Flag((Temp And &H8000) = 0, C_Flag)
         Set_ZN_Flag(Temp And &HFF)
     End Sub
     Private Sub Decrement() 'DEC
-        AdrMode(Opcode)
-        WriteMemory(SavePC, (ReadMemory(SavePC) - 1) And &HFF)
-        Dim Data As Integer = ReadMemory(SavePC)
+        WriteMemory(Effective_Address, (ReadMemory(Effective_Address) - 1) And &HFF)
+        Dim Data As Integer = ReadMemory(Effective_Address)
         Set_ZN_Flag(Data)
     End Sub
     Private Sub Decrement_X() 'DEX
-        AdrMode(Opcode)
         Regs.X = (Regs.X - 1) And &HFF
         Set_ZN_Flag(Regs.X)
     End Sub
     Private Sub Decrement_Y() 'DEY
-        AdrMode(Opcode)
         Regs.Y = (Regs.Y - 1) And &HFF
         Set_ZN_Flag(Regs.Y)
     End Sub
     Private Sub Exclusive_Or() 'EOR
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        Regs.A = Regs.A Xor Data
-        Set_ZN_Flag(Regs.A)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Regs.AC = Regs.AC Xor Data
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Increment() 'INC
-        AdrMode(Opcode)
-        WriteMemory(SavePC, (ReadMemory(SavePC) + 1) And &HFF)
-        Dim Data As Integer = ReadMemory(SavePC)
+        WriteMemory(Effective_Address, (ReadMemory(Effective_Address) + 1) And &HFF)
+        Dim Data As Integer = ReadMemory(Effective_Address)
         Set_ZN_Flag(Data)
     End Sub
     Private Sub Increment_X() 'INX
-        AdrMode(Opcode)
         Regs.X = (Regs.X + 1) And &HFF
         Set_ZN_Flag(Regs.X)
     End Sub
     Private Sub Increment_Y() 'INY
-        AdrMode(Opcode)
         Regs.Y = (Regs.Y + 1) And &HFF
         Set_ZN_Flag(Regs.Y)
     End Sub
     Private Sub Jump() 'JMP
-        AdrMode(Opcode)
-        PC = SavePC
+        Regs.PC = Effective_Address
     End Sub
     Private Sub Jump_To_Subroutine() 'JSR
-        PC += 1
-        Push(PC >> 8)
-        Push(PC And &HFF)
-        PC -= 1
-        AdrMode(Opcode)
-        PC = SavePC
+        Push((Regs.PC - 1) >> 8)
+        Push((Regs.PC - 1) And &HFF)
+        Regs.PC = Effective_Address
     End Sub
     Private Sub Load_Accumulator() 'LDA
-        AdrMode(Opcode)
-        Regs.A = ReadMemory(SavePC)
-        Set_ZN_Flag(Regs.A)
+        Regs.AC = ReadMemory(Effective_Address)
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Load_X() 'LDX
-        AdrMode(Opcode)
-        Regs.X = ReadMemory(SavePC)
+        Regs.X = ReadMemory(Effective_Address)
         Set_ZN_Flag(Regs.X)
     End Sub
     Private Sub Load_Y() 'LDY
-        AdrMode(Opcode)
-        Regs.Y = ReadMemory(SavePC)
+        Regs.Y = ReadMemory(Effective_Address)
         Set_ZN_Flag(Regs.Y)
     End Sub
     Private Sub Logical_Shift_Right() 'LSR
         If AddrMode(Opcode) = ADDR_ACC Then
-            TST_Flag(Regs.A And &H1, C_Flag)
-            Regs.A >>= 1
-            Set_ZN_Flag(Regs.A)
+            Test_Flag(Regs.AC And &H1, C_Flag)
+            Regs.AC >>= 1
+            Set_ZN_Flag(Regs.AC)
         Else
-            AdrMode(Opcode)
-            Dim Data As Byte = ReadMemory(SavePC)
-            TST_Flag(Data And &H1, C_Flag)
+            Dim Data As Byte = ReadMemory(Effective_Address)
+            Test_Flag(Data And &H1, C_Flag)
             Data >>= 1
-            WriteMemory(SavePC, Data)
+            WriteMemory(Effective_Address, Data)
             Set_ZN_Flag(Data)
         End If
     End Sub
     Private Sub No_Operation() 'NOP
-        AdrMode(Opcode) 'Some NOP's need this
         'Nothing to do here!
     End Sub
     Private Sub Or_With_Accumulator() 'ORA
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC)
-        Regs.A = Regs.A Or Data
-        Set_ZN_Flag(Regs.A)
+        Dim Data As Integer = ReadMemory(Effective_Address)
+        Regs.AC = Regs.AC Or Data
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Push_Accumulator() 'PHA
-        Push(Regs.A)
+        Push(Regs.AC)
     End Sub
     Private Sub Push_Processor_Status() 'PHP
-        Push(Regs.P Or B_Flag)
+        Push(Regs.SR Or B_Flag)
     End Sub
-    Private Sub Pull_Accumulator() 'PLA ***
-        Regs.A = POP()
-        Set_ZN_Flag(Regs.A)
+    Private Sub Pull_Accumulator() 'PLA
+        Regs.AC = Pull()
+        Set_ZN_Flag(Regs.AC)
     End Sub
-    Private Sub Pull_Processor_Status() 'PLP ***
-        Regs.P = POP() Or R_Flag
+    Private Sub Pull_Processor_Status() 'PLP
+        Regs.SR = Pull() Or R_Flag
     End Sub
     Private Sub Rotate_Left() 'ROL
         If AddrMode(Opcode) = ADDR_ACC Then
-            If (Regs.P And C_Flag) Then
-                TST_Flag(Regs.A And &H80, C_Flag)
-                Regs.A = (Regs.A << 1) Or &H1
+            If (Regs.SR And C_Flag) Then
+                Test_Flag(Regs.AC And &H80, C_Flag)
+                Regs.AC = (Regs.AC << 1) Or &H1
             Else
-                TST_Flag(Regs.A And &H80, C_Flag)
-                Regs.A <<= 1
+                Test_Flag(Regs.AC And &H80, C_Flag)
+                Regs.AC <<= 1
             End If
-            Set_ZN_Flag(Regs.A)
+            Set_ZN_Flag(Regs.AC)
         Else
-            AdrMode(Opcode)
-            Dim Data As Byte = ReadMemory(SavePC)
-            If (Regs.P And C_Flag) Then
-                TST_Flag(Data And &H80, C_Flag)
+            Dim Data As Byte = ReadMemory(Effective_Address)
+            If (Regs.SR And C_Flag) Then
+                Test_Flag(Data And &H80, C_Flag)
                 Data = (Data << 1) Or &H1
             Else
-                TST_Flag(Data And &H80, C_Flag)
+                Test_Flag(Data And &H80, C_Flag)
                 Data <<= 1
             End If
-            WriteMemory(SavePC, Data)
+            WriteMemory(Effective_Address, Data)
             Set_ZN_Flag(Data)
         End If
     End Sub
     Private Sub Rotate_Right() 'ROR
         If AddrMode(Opcode) = ADDR_ACC Then
-            If (Regs.P And C_Flag) Then
-                TST_Flag(Regs.A And &H1, C_Flag)
-                Regs.A = (Regs.A >> 1) Or &H80
+            If (Regs.SR And C_Flag) Then
+                Test_Flag(Regs.AC And &H1, C_Flag)
+                Regs.AC = (Regs.AC >> 1) Or &H80
             Else
-                TST_Flag(Regs.A And &H1, C_Flag)
-                Regs.A >>= 1
+                Test_Flag(Regs.AC And &H1, C_Flag)
+                Regs.AC >>= 1
             End If
-            Set_ZN_Flag(Regs.A)
+            Set_ZN_Flag(Regs.AC)
         Else
-            AdrMode(Opcode)
-            Dim Data As Byte = ReadMemory(SavePC)
-            If (Regs.P And C_Flag) Then
-                TST_Flag(Data And &H1, C_Flag)
+            Dim Data As Byte = ReadMemory(Effective_Address)
+            If (Regs.SR And C_Flag) Then
+                Test_Flag(Data And &H1, C_Flag)
                 Data = (Data >> 1) Or &H80
             Else
-                TST_Flag(Data And &H1, C_Flag)
+                Test_Flag(Data And &H1, C_Flag)
                 Data >>= 1
             End If
-            WriteMemory(SavePC, Data)
+            WriteMemory(Effective_Address, Data)
             Set_ZN_Flag(Data)
         End If
     End Sub
     Private Sub Return_From_Interrupt() 'RTI
-        Regs.P = POP() Or R_Flag
-        PC = POP()
-        PC = PC Or POP() * &H100
+        Regs.SR = Pull() Or R_Flag
+        Regs.PC = Pull()
+        Regs.PC = Regs.PC Or Pull() * &H100
     End Sub
     Private Sub Return_From_Subroutine() 'RTS
-        PC = POP()
-        PC = PC Or POP() * &H100
-        PC += 1
+        Regs.PC = Pull()
+        Regs.PC = Regs.PC Or Pull() * &H100
+        Regs.PC += 1
     End Sub
     Private Sub Subtract_With_Carry() 'SBC
-        AdrMode(Opcode)
-        Dim Data As Integer = ReadMemory(SavePC) Xor &HFF
-        Dim Temp As Integer = Regs.A + Data + (Regs.P And C_Flag)
-        TST_Flag(Temp > &HFF, C_Flag)
-        TST_Flag(((Not (Regs.A Xor Data)) And (Regs.A Xor Temp) And &H80), V_Flag)
-        Regs.A = Temp And &HFF
-        Set_ZN_Flag(Regs.A)
+        Dim Data As Integer = ReadMemory(Effective_Address) Xor &HFF
+        Dim Temp As Integer = Regs.AC + Data + (Regs.SR And C_Flag)
+        Test_Flag(Temp > &HFF, C_Flag)
+        Test_Flag(((Not (Regs.AC Xor Data)) And (Regs.AC Xor Temp) And &H80), V_Flag)
+        Regs.AC = Temp And &HFF
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Set_Carry() 'SEC
         Set_Flag(C_Flag)
@@ -698,99 +614,101 @@ Module _6502
         Set_Flag(I_Flag)
     End Sub
     Private Sub Store_Accumulator() 'STA
-        AdrMode(Opcode)
-        WriteMemory(SavePC, Regs.A)
+        WriteMemory(Effective_Address, Regs.AC)
     End Sub
     Private Sub Store_X() 'STX
-        AdrMode(Opcode)
-        WriteMemory(SavePC, Regs.X)
+        WriteMemory(Effective_Address, Regs.X)
     End Sub
     Private Sub Store_Y() 'STY
-        AdrMode(Opcode)
-        WriteMemory(SavePC, Regs.Y)
+        WriteMemory(Effective_Address, Regs.Y)
     End Sub
     Private Sub Transfer_Accumulator_To_X() 'TAX
-        Regs.X = Regs.A
+        Regs.X = Regs.AC
         Set_ZN_Flag(Regs.X)
     End Sub
     Private Sub Transfer_Accumulator_To_Y() 'TAY
-        Regs.Y = Regs.A
+        Regs.Y = Regs.AC
         Set_ZN_Flag(Regs.Y)
     End Sub
     Private Sub Transfer_Stack_Pointer_To_X() 'TSX
-        Regs.X = Regs.S
+        Regs.X = Regs.SP
         Set_ZN_Flag(Regs.X)
     End Sub
     Private Sub Transfer_X_To_Accumulator() 'TXA
-        Regs.A = Regs.X
-        Set_ZN_Flag(Regs.A)
+        Regs.AC = Regs.X
+        Set_ZN_Flag(Regs.AC)
     End Sub
     Private Sub Transfer_X_To_Stack_Pointer() 'TXS
-        Regs.S = Regs.X
+        Regs.SP = Regs.X
     End Sub
     Private Sub Transfer_Y_To_Accumulator() 'TYA
-        Regs.A = Regs.Y
-        Set_ZN_Flag(Regs.A)
+        Regs.AC = Regs.Y
+        Set_ZN_Flag(Regs.AC)
     End Sub
 
-#Region "Flags"
+    'Flags
     Private Sub Set_Flag(Value As Byte)
-        Regs.P = Regs.P Or Value
+        Regs.SR = Regs.SR Or Value
     End Sub
     Private Sub Clear_Flag(Value As Byte)
-        Regs.P = Regs.P And Not Value
+        Regs.SR = Regs.SR And Not Value
     End Sub
     Private Sub Set_ZN_Flag(Value As Byte)
-        If Value Then Clear_Flag(Z_Flag) Else Set_Flag(Z_Flag)
-        If Value And N_Flag Then Set_Flag(N_Flag) Else Clear_Flag(N_Flag)
-    End Sub
-    Private Sub TST_Flag(Condition As Boolean, Value As Byte)
-        If Condition Then Set_Flag(Value) Else Clear_Flag(Value)
-    End Sub
-#End Region
+        If Value Then
+            Clear_Flag(Z_Flag)
+        Else
+            Set_Flag(Z_Flag)
+        End If
 
-#Region "Interrupt"
+        If Value And N_Flag Then
+            Set_Flag(N_Flag)
+        Else
+            Clear_Flag(N_Flag)
+        End If
+    End Sub
+    Private Sub Test_Flag(SetFlag As Boolean, Value As Byte)
+        If SetFlag Then
+            Set_Flag(Value)
+        Else
+            Clear_Flag(Value)
+        End If
+    End Sub
+
+    'Misc
+    Private Function Fetch() As Integer
+        Dim RetVal As Integer = ReadMemory(Regs.PC) : Regs.PC += 1
+        Return RetVal
+    End Function
+    Private Function Fetch16() As Integer
+        Dim RetVal As Integer = ReadMemory16(Regs.PC) : Regs.PC += 2
+        Return RetVal
+    End Function
+    Private Sub Push(Value As Byte)
+        WriteMemory(Base_Stack + Regs.SP, Value)
+        Regs.SP = (Regs.SP - 1) And &HFF
+    End Sub
+    Private Function Pull() As Byte
+        Regs.SP = (Regs.SP + 1) And &HFF
+        Return ReadMemory(Base_Stack + Regs.SP)
+    End Function
+
+    'Interrupts (Note: Break is on Instructions)
     Public Sub CPU_NMI()
-        Push(PC >> 8)
-        Push(PC And &HFF)
+        Push(Regs.PC >> 8)
+        Push(Regs.PC And &HFF)
         Clear_Flag(B_Flag)
-        Push(Regs.P)
+        Push(Regs.SR)
         Set_Flag(I_Flag)
-        PC = ReadMemory16(NMI_Vector)
+        Regs.PC = ReadMemory16(NMI_Vector)
         Tick_Count += 7
     End Sub
     Public Sub CPU_IRQ()
-        Push(PC >> 8)
-        Push(PC And &HFF)
+        Push(Regs.PC >> 8)
+        Push(Regs.PC And &HFF)
         Clear_Flag(B_Flag)
-        Push(Regs.P)
+        Push(Regs.SR)
         Set_Flag(I_Flag)
-        PC = ReadMemory16(IRQ_Vector)
+        Regs.PC = ReadMemory16(IRQ_Vector)
         Tick_Count += 7
     End Sub
-#End Region
-
-#Region "Misc (Fetch, Push, Pull, POP)"
-    Private Function Fetch() As Integer
-        Dim Temp As Integer = ReadMemory(PC)
-        PC += 1
-        Return Temp
-    End Function
-    Private Function Fetch16() As Integer
-        Dim Temp As Integer = ReadMemory16(PC)
-        PC += 2
-        Return Temp
-    End Function
-
-    Private Sub Push(Value As Byte)
-        WriteMemory(&H100 + Regs.S, Value)
-        Regs.S = (Regs.S - 1) And &HFF
-    End Sub
-
-    Private Function POP() As Byte
-        Regs.S = (Regs.S + 1) And &HFF
-        Return ReadMemory(&H100 + Regs.S)
-    End Function
-#End Region
-
 End Module

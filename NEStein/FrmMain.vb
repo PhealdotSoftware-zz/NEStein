@@ -96,7 +96,7 @@
     End Sub
     Private Sub ResetToolStripMenuItem_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles ResetToolStripMenuItem.Click
         Mapper_Reset()
-        Reset_CPU()
+        CPU_Reset()
     End Sub
 
     '-------------------------------------------------------------------------
